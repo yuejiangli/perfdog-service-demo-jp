@@ -196,6 +196,13 @@ class Service(object):
         req = perfdog_pb2.AddRemoteHostDeviceReq(type=perfdog_pb2.XBOX, ip=ip_address, password=password)
         self.stub().addRemoteHostDevice(req)
 
+    def update_remote_windows_device(self):
+        req = perfdog_pb2.Empty()
+        self.stub().updateRemoteWindowsDevice(req)
+        
+    def launch_as_remote_collector(self):
+        req = perfdog_pb2.Empty()
+        self.stub().launchAsRemoteCollector(req)
 
 class Device(object):
     def __init__(self, real_device, stub_factory):
@@ -595,7 +602,9 @@ class Test(object):
         device_status = self.__device.get_status()
         if device_status.isTesting:
             self.__device.stop_test()
-        self.__device.init()
+        if not device_status.isValid:
+            self.__device.init()
+        device_status = self.__device.get_status()
 
         #
         self.__available_types, self.__available_dynamic_types = self.__device.get_available_types()
