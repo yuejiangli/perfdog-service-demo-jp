@@ -31,6 +31,33 @@ from test_base import create_service, get_all_types, set_floating_window
 # ローカル Excel 出力先ディレクトリ（本スクリプトと同階層の "reports/"）。
 REPORT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'reports')
 
+# -----------------------------------------------------------------------------
+# Test target settings -- update for your own device & app.
+# 計測対象の設定 -- 実機と対象アプリに合わせて書き換えてください。
+#
+# DEVICE_SERIAL:
+#   USB device serial id. Run `python cmds.py getdevices` to list ids.
+#   For Wi-Fi (adb connect) devices, switch to service.get_wifi_device() below.
+#   USB デバイスのシリアル ID。`python cmds.py getdevices` で確認可能。
+#   "adb connect" 接続の端末を使う場合は service.get_wifi_device() に切り替える。
+#
+# PACKAGE_NAME:
+#   Android package name (or iOS bundle id) of the app under test.
+#   計測対象アプリの Android パッケージ名（または iOS バンドル ID）。
+#
+# CASE_PREFIX:
+#   Prefix for the auto-generated case name (e.g. "nikke" -> "nikke_20260519_140000").
+#   自動生成されるケース名の接頭辞（例: "nikke" -> "nikke_20260519_140000"）。
+#
+# Each value also accepts an environment variable override, so CI / shell users
+# can run e.g. `PERFDOG_DEVICE=XXXX PERFDOG_PACKAGE=com.example python test.py`.
+# 各値は環境変数による上書きにも対応。CI やシェルから
+# `PERFDOG_DEVICE=XXXX PERFDOG_PACKAGE=com.example python test.py` のように指定可能。
+# -----------------------------------------------------------------------------
+DEVICE_SERIAL = os.environ.get('PERFDOG_DEVICE', '2A091FDH300CYB')
+PACKAGE_NAME = os.environ.get('PERFDOG_PACKAGE', 'com.proximabeta.nikke')
+CASE_PREFIX = os.environ.get('PERFDOG_CASE_PREFIX', 'nikke')
+
 
 def main():
     # Configure root logger format and level.
@@ -56,9 +83,9 @@ def main():
     # シリアル ID で USB デバイスを取得する。
     # 利用可能な ID は cmds.py の "getdevices" で確認できる。
     # "adb connect" 経由の端末は service.get_wifi_device() を使うこと。
-    device = service.get_usb_device('2A091FDH300CYB')
+    device = service.get_usb_device(DEVICE_SERIAL)
     if device is None:
-        logging.error("device not found")
+        logging.error("device not found: %s", DEVICE_SERIAL)
         return
 
     # Run the test against the target package.
@@ -66,7 +93,7 @@ def main():
     # 対象パッケージに対して計測を実行する。
     # 下記の指標はすべて `cmds.py gettypes <id>` で本機の対応を確認済み。
     run_test_app(device,
-                 package_name='com.proximabeta.nikke',
+                 package_name=PACKAGE_NAME,
                  types=[
                      perfdog_pb2.FPS,                    # Frames per second / FPS
                      perfdog_pb2.FRAME_TIME,             # Frame time (ms) / フレーム時間
@@ -195,7 +222,7 @@ def run_test_app(device, package_name, types=None, dynamic_types=None, enable_al
         # Persist results: upload to PerfDog cloud + export Excel locally.
         # 結果を保存する: PerfDog クラウドへアップロード + ローカル Excel 出力。
         os.makedirs(REPORT_DIR, exist_ok=True)
-        case_name = 'nikke_{}'.format(time.strftime('%Y%m%d_%H%M%S'))
+        case_name = '{}_{}'.format(CASE_PREFIX, time.strftime('%Y%m%d_%H%M%S'))
         test.save_data(
             case_name=case_name,
             is_upload=True,                                  # upload to cloud / クラウド送信
