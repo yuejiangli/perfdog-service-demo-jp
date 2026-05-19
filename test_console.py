@@ -1,5 +1,10 @@
 # coding: utf-8
 
+# =============================================================================
+# Console (PlayStation 5 / Xbox) performance collection sample.
+# コンシューマ機（PlayStation 5 / Xbox）向け性能計測サンプル。
+# =============================================================================
+
 import logging
 import threading
 import time
@@ -10,76 +15,74 @@ from test_base import create_service, get_all_types
 
 
 def main():
-    # Log output configuration, you can configure it yourself if you have special needs
-    # 日志输出配置，如果有特别的需要可自行配置
+    # Configure root logger format and level.
+    # ルートロガーのフォーマットとレベルを設定する。
     logging.basicConfig(format="%(asctime)s-%(levelname)s: %(message)s", level=logging.INFO)
 
-    # Create service object proxy
-    # 创建服务对象代理
+    # Create the PerfDogService gRPC proxy.
+    # PerfDogService の gRPC プロキシを生成する。
     service = create_service()
 
     # TODO:
-    # Add console device, mostly used for adding devices for the first time
-    # 添加主机设备，多用于第一次添加设备
+    # Register console devices. Usually only required the first time.
+    # コンシューマ機を登録する。通常は初回のみ必要。
     service.add_remote_play_station_device(ip_address="192.168.0.0")
     service.add_remote_xbox_device(ip_address="192.168.0.0", password="test")
     time.sleep(2)
 
     # TODO:
-    # Fill in the correct device ID
-    # You can use cmds.py in the same directory to obtain the list of devices connected to the computer
-    # 填入正确的设备ID
-    # 可以使用同目录下cmds.py获取已连接到电脑的设备列表
+    # Resolve a Wi-Fi device by its serial id.
+    # Use cmds.py "getdevices" to list available device ids.
+    # シリアル ID で Wi-Fi 端末を解決する。
+    # 利用可能な ID は cmds.py の "getdevices" で確認できる。
     device = service.get_wifi_device('-')
     if device is None:
         logging.error("non-exist device")
         return
 
-    # Check if the device is occupied
-    # 确认设备是否被占用
+    # Check whether the device is already occupied by another user.
+    # 当端末が他ユーザーに占有されていないか確認する。
     other_user = device.occupied_by_other_user()
     if other_user:
         logging.info("device occupied by %s", other_user)
 
     # TODO:
-    # Continuing will force the device to connect
-    # Fill the package name of the test app
-    # You can use cmds.py in the same directory to obtain the App list of the corresponding devices
-    # 继续执行会强行连接设备
-    # 填入测试app的包名
-    # 可以使用同目录下cmds.py获取相应设备的App列表
+    # Continuing past this point will forcibly take over the device.
+    # Fill in the package name of the app under test.
+    # この先に進むと端末を強制的に奪取する。
+    # 計測対象アプリのパッケージ名を入力すること。
     run_test(device=device, package_name='-', types=[perfdog_pb2.FPS, perfdog_pb2.FRAME_TIME])
 
 
 def run_test(device, package_name, types=None, dynamic_types=None, enable_all_types=False):
-    # Create test object
-    # 创建测试对象
+    # Create the Test object that owns the lifecycle of one collection session.
+    # 1 回の計測セッションのライフサイクルを管理する Test オブジェクトを生成する。
     test = Test(device)
 
-    # Set up performance data callback
-    # 设置有性能数据回调
+    # Event flag fired on the first received perf-data sample.
+    # 最初の性能データを受信した時にセットされる Event フラグ。
     evt = threading.Event()
     test.set_first_perf_data_callback(lambda: evt.set())
 
-    # Output performance data, it is recommended to enable it during debugging
-    # 输出性能数据，调试过程中建议开启
+    # Per-second perf-data callback. Useful while debugging.
+    # 1 秒ごとに流れる性能データのコールバック。デバッグ時に有用。
     test.set_perf_data_callback(lambda perf_data: logging.info(perf_data))
 
-    # Output the alarm and error information during the test. It is recommended to keep it. It is easy to check the log if there is a problem
-    # 输出测试过程中告警和错误信息，建议保留，出问题便于查日志
+    # Error / warning callbacks. Keep them on so problems are visible in logs.
+    # エラー / 警告コールバック。問題発生時にログから追えるよう常時有効化する。
     test.set_error_perf_data_callback(lambda perf_data: logging.info("PerfDog: %s", perf_data.errorData.msg))
     test.set_warning_perf_data_callback(lambda perf_data: logging.warning("PerfDog: %s", perf_data.warningData.msg))
 
-    # Create the target App to be tested. PS5 supports creating the target process to be tested.
-    # 创建要测试目标App，PS5支持创建要测试目标进程
+    # Build the test target. PS5 also supports targeting a system process.
+    # 計測対象を生成する。PS5 はシステムプロセスを対象にすることも可能。
     builder = test.create_test_target_builder(TestAppBuilder)
     builder.set_package_name(package_name)
     # builder = test.create_test_target_builder(TestSysProcessBuilder)
     # builder.set_pid(pid)
     test.set_test_target(builder.build())
 
-    # Enable and disable related performance indicator types
-    # 启用和禁用相关性能指标类型
+    # Enable / disable performance metric types.
+    # 関連する性能指標を有効化 / 無効化する。
     if enable_all_types:
         types, dynamic_types = get_all_types(device)
 
@@ -90,19 +93,19 @@ def run_test(device, package_name, types=None, dynamic_types=None, enable_all_ty
         test.set_dynamic_types(*dynamic_types)
 
     try:
-        # Start performance data collection
-        # 启动性能数据采集
+        # Begin performance data collection.
+        # 性能データの収集を開始する。
         test.start()
 
-        # Wait for performance data
-        # Need to use set_first_perf_data_callback to enable
-        # 等待有性能数据
-        # 需要使用set_first_perf_data_callback来启用
+        # Block until the first sample arrives.
+        # Requires set_first_perf_data_callback() above.
+        # 最初のサンプルが届くまでブロックする。
+        # 上の set_first_perf_data_callback() が必須。
         evt.wait()
 
         # TODO:
-        # It is recommended to add automated test processing logic here
-        # 建议在此处添加自动化测试处理逻辑
+        # Insert your real automation steps here.
+        # 実際の自動化操作はここに追加する。
         time.sleep(10)
         test.set_label('label_x')
         time.sleep(2)
@@ -112,8 +115,8 @@ def run_test(device, package_name, types=None, dynamic_types=None, enable_all_ty
         test.save_data()
 
     finally:
-        # Release necessary resources
-        # 必要的资源释放
+        # Safety net: ensure collection is stopped even if an exception was raised.
+        # 安全策: 例外発生時でも計測が確実に停止されるようにする。
         if test.is_start():
             test.stop()
 

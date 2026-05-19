@@ -1,5 +1,6 @@
 # Language
-- [English](readme.md)
+- [日本語](readme.md)
+- [English](readme_en.md)
 - [中文](readme_zh.md)
 
 # perfdog-service-demo-v2

@@ -1,81 +1,104 @@
 # coding: utf-8
 
+# =============================================================================
+# Remote-Windows device discovery utility.
+# Lists every Windows device currently visible through PerfDogService and lets
+# the user generate ready-to-paste device-config snippets.
+#
+# Windows リモート端末ディスカバリツール。
+# PerfDogService から見える Windows 端末を一覧表示し、そのままコピー利用できる
+# デバイス設定スニペットを生成する。
+# =============================================================================
+
 import logging
 import sys
 import time
 import perfdog_pb2
 from test_base import create_service
 
+
 def discover_devices(port=23456):
-    """发现并显示所有可用设备 / Discover and display all available devices"""
-    
+    """Discover and display all available devices.
+    全ての利用可能な端末を検出して表示する。
+    """
+
     logging.basicConfig(
         format="%(asctime)s-%(levelname)s: %(message)s",
         level=logging.INFO
     )
-    
-    print("=== PerfDog 设备发现工具 ===")
+
+    print("=== PerfDog device discovery / 端末ディスカバリ ===")
     print()
-    
-    # 创建服务 / Create service
+
+    # Create the Service proxy.
+    # Service プロキシを生成する。
     try:
         service = create_service(port=port)
         logging.info(f"Service connected successfully on port {port}")
     except Exception as e:
         logging.error(f"Failed to connect to PerfDog service on port {port}: {e}")
         return []
-    
-    # 刷新远程设备列表 / Refresh remote device list
+
+    # Refresh remote Windows device list.
+    # リモート Windows 端末一覧を更新する。
     try:
         logging.info("Refreshing remote device list...")
         service.update_remote_windows_device()
-        time.sleep(2)  # 等待设备列表更新 / Wait for device list update
+        # Wait for the device list to be updated.
+        # デバイス一覧の更新を待機する。
+        time.sleep(2)
     except Exception as e:
         logging.warning(f"Failed to refresh remote devices: {e}")
-    
-    # 获取所有设备 / Get all devices
+
+    # Fetch every device.
+    # 全端末を取得する。
     try:
         all_devices = service.get_devices()
         logging.info(f"Found {len(all_devices)} total devices")
     except Exception as e:
         logging.error(f"Failed to get device list: {e}")
         return []
-    
-    # 筛选Windows设备 / Filter Windows devices
+
+    # Filter Windows devices.
+    # Windows 端末のみ抽出する。
     windows_devices = []
     for device in all_devices:
         if device.os_type() == perfdog_pb2.WINDOWS:
             windows_devices.append(device)
-    
+
     if not windows_devices:
         logging.warning("No Windows devices found")
         return []
-    
+
     logging.info(f"Found {len(windows_devices)} Windows devices:")
     print()
     print("=" * 100)
     print(f"{'#':<3} {'Device Name':<30} {'Device ID':<40} {'Access Type':<15} {'Connection':<10}")
     print("=" * 100)
-    
+
     device_info_list = []
-    
+
     for i, device in enumerate(windows_devices):
         try:
             real_dev = device.real_device()
             access_type_info = "Unknown"
             access_type_raw = None
-            
-            # 获取访问类型 / Get access type
+
+            # Read the access type field if available.
+            # アクセスタイプフィールドが存在すれば読み出す。
             if hasattr(real_dev, 'accessType'):
                 access_type_raw = real_dev.accessType
             elif hasattr(real_dev, 'access_type'):
                 access_type_raw = real_dev.access_type
-            
-            # 转换为可读字符串 / Convert to readable string
+
+            # Convert to a human-readable string.
+            # 人間が読める文字列に変換する。
             if access_type_raw is not None:
                 if access_type_raw == perfdog_pb2.LOCAL:
-                    # 如果设备名称包含Remote但access_type是LOCAL，说明是远程设备的本地代理
-                    # If device name contains Remote but access_type is LOCAL, it's a local proxy for remote device
+                    # If the device name contains "(Remote)" but access_type is
+                    # LOCAL, this entry is the local proxy of a remote device.
+                    # 端末名に "(Remote)" を含むが access_type が LOCAL の場合、
+                    # それはリモート端末のローカルプロキシ。
                     if "(Remote)" in device.name():
                         access_type_info = "REMOTE_LOCAL"
                     else:
@@ -95,17 +118,17 @@ def discover_devices(port=23456):
                         access_type_info = "LOCAL(USB)"
                     elif conn_type == perfdog_pb2.WIFI:
                         access_type_info = "REMOTE(WIFI)"
-            
-            # 连接类型 - 对于远程设备，更准确地显示连接类型
-            # Connection type - display connection type more accurately for remote devices
+
+            # Connection type. For remote devices we report NETWORK explicitly.
+            # 接続タイプ。リモート端末は NETWORK と明示的に表示する。
             conn_type = device.conn_type()
             if "(Remote)" in device.name():
-                # 远程设备通过网络连接到本地PerfDog服务
-                # Remote devices connect to local PerfDog service via network
+                # Remote devices reach the local PerfDogService over the network.
+                # リモート端末はネットワーク経由でローカル PerfDogService に接続する。
                 conn_type_str = "NETWORK"
             else:
                 conn_type_str = "USB" if conn_type == perfdog_pb2.USB else "WIFI"
-            
+
             device_info = {
                 'index': i + 1,
                 'name': device.name(),
@@ -114,77 +137,95 @@ def discover_devices(port=23456):
                 'conn_type': conn_type_str,
                 'device_obj': device
             }
-            
+
             device_info_list.append(device_info)
-            
+
             print(f"{i+1:<3} {device.name():<30} {device.uid():<40} {access_type_info:<15} {conn_type_str:<10}")
-            
+
         except Exception as e:
             logging.warning(f"Failed to get info for device {i+1}: {e}")
-    
+
     print("=" * 100)
     print()
-    
+
     return device_info_list
 
+
 def interactive_mode():
-    """交互式模式 / Interactive mode"""
-    
-    # 发现设备 / Discover devices
+    """Interactive mode.
+    対話モード。
+    """
+
+    # Run discovery first.
+    # まず端末ディスカバリを実行する。
     devices = discover_devices()
     if not devices:
         return
-    
+
     while True:
-        print("\n=== 操作选项 ===")
-        print("1. 生成设备配置代码")
-        print("2. 重新扫描设备")
-        print("3. 退出")
-        
-        choice = input("\n请选择操作 (1-3): ").strip()
-        
+        print("\n=== Menu / メニュー ===")
+        print("1. Generate device config snippet / 端末設定スニペットを生成")
+        print("2. Rescan devices / 端末を再スキャン")
+        print("3. Quit / 終了")
+
+        choice = input("\nSelect (1-3) / 選択 (1-3): ").strip()
+
         if choice == '1':
-            # 生成配置代码 / Generate configuration code
-            print("\n=== 生成设备配置 ===")
-            selected_devices = input("请输入要配置的设备编号 (用逗号分隔，如: 1,2,3): ").strip()
-            
+            # Generate config code.
+            # 設定コードを生成する。
+            print("\n=== Generate device config / 端末設定の生成 ===")
+            selected_devices = input(
+                "Enter device numbers (comma separated, e.g. 1,2,3) / "
+                "端末番号をカンマ区切りで入力（例: 1,2,3）: "
+            ).strip()
+
             try:
                 device_indices = [int(x.strip()) - 1 for x in selected_devices.split(',')]
                 generate_config_code(devices, device_indices)
             except ValueError:
-                print("请输入有效的设备编号")
-        
+                print("Invalid device number / 無効な端末番号です")
+
         elif choice == '2':
-            # 重新扫描 / Rescan devices
+            # Rescan devices.
+            # 端末を再スキャンする。
             devices = discover_devices()
             if not devices:
                 break
-        
+
         elif choice == '3':
-            print("退出设备发现工具")
+            print("Bye / 終了します")
             break
-        
+
         else:
-            print("无效选择，请重新输入")
+            print("Invalid selection, try again / 無効な選択です。再入力してください。")
+
 
 def generate_config_code(devices, device_indices):
-    """生成设备配置代码 / Generate device configuration code"""
-    
-    print("\n=== 生成的设备配置代码 ===")
+    """Generate device configuration code.
+    端末設定コードを生成する。
+    """
+
+    print("\n=== Generated device config / 生成された端末設定 ===")
     print()
-    
+
     for i, index in enumerate(device_indices):
         if 0 <= index < len(devices):
             device_info = devices[index]
-            
-            # 获取默认PID（可以提示用户输入）
-            pid_input = input(f"请输入设备 '{device_info['name']}' 要测试的进程PID: ").strip()
+
+            # Ask the user which PID to test on this device.
+            # この端末で計測する対象プロセスの PID をユーザーに尋ねる。
+            pid_input = input(
+                f"PID for device '{device_info['name']}' / "
+                f"端末 '{device_info['name']}' で計測する PID: "
+            ).strip()
             try:
                 pid = int(pid_input)
             except ValueError:
-                pid = 1234  # 默认值
-                print(f"使用默认PID: {pid}")
-            
+                # Default value when no PID is provided.
+                # PID 未入力時の既定値。
+                pid = 1234
+                print(f"Using default PID / 既定 PID を使用: {pid}")
+
             print(f"        {{")
             print(f"            'device_id': '{device_info['uid']}',")
             print(f"            'pid': {pid},")
@@ -192,31 +233,38 @@ def generate_config_code(devices, device_indices):
             print(f"            'cycle_interval': 15,")
             print(f"            'max_cycles': 3")
             print(f"        }},")
-            
+
             if i < len(device_indices) - 1:
                 print()
-    
-    print("\n=== 配置代码生成完成 ===")
+
+    print("\n=== Config generation done / 設定生成完了 ===")
+
 
 def main():
-    """主函数"""
-    
+    """Entry point.
+    エントリポイント。
+    """
+
     if len(sys.argv) > 1:
         if sys.argv[1] == '--list':
-            # 只列出设备
+            # List devices only.
+            # 端末一覧のみ表示する。
             discover_devices()
         elif sys.argv[1] == '--port' and len(sys.argv) > 2:
-            # 指定端口
+            # Use a custom port.
+            # 任意のポートを指定する。
             try:
                 port = int(sys.argv[2])
                 discover_devices(port)
             except ValueError:
                 print("Invalid port number")
         else:
-            print("Usage: python device_discovery.py [--list] [--port PORT_NUMBER]")
+            print("Usage: python test_windows_remote_device_discovery.py [--list] [--port PORT_NUMBER]")
     else:
-        # 交互式模式
+        # Interactive mode.
+        # 対話モード。
         interactive_mode()
+
 
 if __name__ == '__main__':
     main()

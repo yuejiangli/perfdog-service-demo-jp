@@ -1,5 +1,17 @@
 # coding: utf-8
 
+# =============================================================================
+# Remote-Windows client sample.
+# Continuously refreshes the remote Windows device list and prints status.
+# Run me on the operator's PC; the remote PC must be running PerfDogService
+# in "remote collector" mode (see test_windows_remote_server.py).
+#
+# Windows リモート計測 クライアント側サンプル。
+# リモート Windows 端末の一覧を継続的に更新し、状態を出力する。
+# 操作者側 PC で実行する。リモート PC 側では「リモート コレクタ」モードで
+# PerfDogService を起動しておくこと（test_windows_remote_server.py 参照）。
+# =============================================================================
+
 import logging
 import time
 
@@ -8,6 +20,8 @@ from test_base import create_service
 
 
 def get_windows_device(service):
+    # Pick the first Windows device discovered by the service.
+    # Service が認識した Windows 端末のうち最初の 1 台を返す。
     for device in service.get_devices():
         if device.os_type() == perfdog_pb2.WINDOWS:
             return device
@@ -15,20 +29,23 @@ def get_windows_device(service):
 
 
 def main():
-    # Log output configuration, you can configure it yourself if you have special needs
-    # 日志输出配置，如果有特别的需要可自行配置 / Log output configuration, configure yourself if needed
+    # Configure root logger format and level.
+    # ルートロガーのフォーマットとレベルを設定する。
     logging.basicConfig(format="%(asctime)s-%(levelname)s: %(message)s", level=logging.INFO)
 
-    # Create service object proxy
-    # 创建服务对象代理 / Create service object proxy
+    # Create the PerfDogService gRPC proxy.
+    # PerfDogService の gRPC プロキシを生成する。
     service = create_service()
 
-    # Get the device object
-    # 获取设备对象 / Get device object
+    # Periodically refresh the remote-Windows device list and resolve a target.
+    # リモート Windows 端末の一覧を定期的に更新し、対象を解決する。
     while True:
-        # 刷新远程电脑列表 / Refresh remote computer list
+        # Refresh the remote computer list.
+        # リモート PC の一覧を更新する。
         service.update_remote_windows_device()
-        # 获取远程电脑对象 / Get remote computer object
+
+        # Get a remote Windows device object.
+        # リモート Windows 端末オブジェクトを取得する。
         device = get_windows_device(service)
         if device is None:
             logging.error("non-exist device")
@@ -36,7 +53,5 @@ def main():
         time.sleep(2)
 
 
-        
-   
 if __name__ == '__main__':
     main()

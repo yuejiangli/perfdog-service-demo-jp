@@ -1,3 +1,31 @@
-__pycache__
+# Byte-compiled / Python cache
+# Python キャッシュ / バイトコンパイル
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtualenvs
+# 仮想環境
 /venv/
 /.venv/
+
+# macOS metadata
+# macOS メタデータ
+.DS_Store
+
+# Local secrets / per-machine paths (kept out of version control)
+# ローカルの秘密情報・マシン固有パス（バージョン管理対象外）
+config.py
+
+# Test artifacts (collected reports, screenshots, etc.)
+# 計測成果物（レポート / スクリーンショット 等）
+/reports/
+
+# Editor / IDE
+# エディタ / IDE
+.idea/
+.vscode/
+
+# Excel temporary lock files
+# Excel の一時ロックファイル
+~$*.xlsx

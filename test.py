@@ -1,6 +1,24 @@
 # coding: utf-8
 
+# =============================================================================
+# PerfDog automation entry script (NIKKE example)
+# PerfDog 自動化エントリースクリプト（NIKKE サンプル）
+#
+# Workflow / 処理フロー:
+#   1. Create the PerfDogService gRPC proxy.
+#      PerfDogService の gRPC プロキシを生成する。
+#   2. Resolve a USB-connected device by its serial id.
+#      シリアル ID で USB 接続中のデバイスを取得する。
+#   3. Configure performance metrics & screenshot interval.
+#      取得する性能指標とスクリーンショット間隔を設定する。
+#   4. Start collection -> sleep / label / note -> stop.
+#      計測開始 → 待機 / ラベル / メモ → 計測停止。
+#   5. Upload data to PerfDog cloud and export an Excel file locally.
+#      データを PerfDog クラウドへアップロードし、ローカルに Excel 出力する。
+# =============================================================================
+
 import logging
+import os
 import threading
 import time
 
@@ -9,95 +27,116 @@ from perfdog import Test, TestAppBuilder
 from test_base import create_service, get_all_types, set_floating_window
 
 
+# Local Excel export directory (sibling "reports/" of this script).
+# ローカル Excel 出力先ディレクトリ（本スクリプトと同階層の "reports/"）。
+REPORT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'reports')
+
+
 def main():
-    # Log output configuration, you can configure it yourself if you have special needs
-    # 日志输出配置，如果有特别的需要可自行配置
+    # Configure root logger format and level.
+    # ルートロガーのフォーマットとレベルを設定する。
     logging.basicConfig(format="%(asctime)s-%(levelname)s: %(message)s", level=logging.INFO)
 
-    # Create service object proxy
-    # 创建服务对象代理
+    # Create the PerfDogService proxy. It internally launches the native
+    # PerfDogService binary (path defined in config.py) and connects via gRPC.
+    # PerfDogService プロキシを生成する。内部で config.py に定義された
+    # ネイティブ PerfDogService バイナリを起動し、gRPC で接続する。
     service = create_service()
 
-    # Configure whether to install floating window App, valid for Android devices
-    # If the App has been installed on the device to be tested, please uninstall it from the device manually before continuing to use it
-    # Enable one of the following two configurations according to your own testing requirements
-    # Enable installation
-    # service.enable_install_apk()
-    # Disable installation. You can set it not to install PerfDog APK to reduce unnecessary pauses and interruptions when running automation
-    # 配置是否安装浮窗App，针对安卓设备有效
-    # 如果App已经安装到要测试的设备上，请先手工从设备卸载之后继续使用
-    # 按照自己的测试要求启用下面两个配置中的一个
-    # 启用安装
-    # service.enable_install_apk()
-    # 禁止安装,可设置不安装PerfDog APK，跑自动化时减少不必要的暂停打断
-    service.disable_install_apk()
+    # Floating-window helper APK control (Android only).
+    # Disable installation to avoid interrupting automation runs.
+    # フローティングウィンドウ補助 APK の制御（Android のみ）。
+    # 自動化中の中断を避けるためインストールを無効化する。
+    # service.enable_install_apk()   # enable / 有効化
+    service.disable_install_apk()    # disable / 無効化（推奨）
 
-    # TODO:
-    # Fill in the correct device ID and the package name of the test app
-    # You can use cmds.py in the same directory to obtain the list of devices connected to the computer and the App list of the corresponding devices
-    # You can fill in the type parameter according to your own needs to enable a list of performance indicator parameters. When the type value is None, use the indicator options that are enabled on the current device
-    # To enable indicators, please refer to "Indicator parameter mapping table: https://perfdog.wetest.net/article_detail?id=176&issue_id=0&plat_id=2"
-    # If you need to start collecting performance data for multiple devices in a single script process, you can run the run_test_app function multiple times in parallel through multi-threading
-    # The device connected via "adb connect" needs to use service.get_wifi_device to obtain the device
-    # 填入正确的设备ID，填入测试app的包名
-    # 可以使用同目录下cmds.py获取已连接到电脑的设备列表及相应设备的App列表
-    # 可以根据自己需要填写types参数，来启用的性能指标参数列表，types值为None时，使用当前设备已经开启的指标选项
-    # 指标启用可以参考"指标参数映射表：https://perfdog.qq.com/article_detail?id=10210&issue_id=0&plat_id=2"
-    # 如果单一脚本进程中需要启动针对多个设备性能数据收集，可以通过多线程的方式，并行运行多次run_test_app函数
-    # 通过adb connect连接的设备需要使用service.get_wifi_device获取设备
-
-    device = service.get_usb_device('-')
+    # Resolve the USB device by serial id.
+    # Use cmds.py "getdevices" to list available device ids.
+    # For "adb connect" devices, use service.get_wifi_device() instead.
+    # シリアル ID で USB デバイスを取得する。
+    # 利用可能な ID は cmds.py の "getdevices" で確認できる。
+    # "adb connect" 経由の端末は service.get_wifi_device() を使うこと。
+    device = service.get_usb_device('2A091FDH300CYB')
     if device is None:
         logging.error("device not found")
         return
 
+    # Run the test against the target package.
+    # All metrics below have been verified by `cmds.py gettypes <id>` on this device.
+    # 対象パッケージに対して計測を実行する。
+    # 下記の指標はすべて `cmds.py gettypes <id>` で本機の対応を確認済み。
     run_test_app(device,
-                 package_name='-',
-                 types=[perfdog_pb2.FPS, perfdog_pb2.FRAME_TIME, perfdog_pb2.CPU_USAGE, perfdog_pb2.MEMORY],
+                 package_name='com.proximabeta.nikke',
+                 types=[
+                     perfdog_pb2.FPS,                    # Frames per second / FPS
+                     perfdog_pb2.FRAME_TIME,             # Frame time (ms) / フレーム時間
+                     perfdog_pb2.CPU_USAGE,              # Process CPU usage / プロセス CPU 使用率
+                     perfdog_pb2.NORMALIZED_CPU_USAGE,   # Normalized CPU / 正規化 CPU
+                     perfdog_pb2.CORE_USAGE,             # Per-core usage / コア別使用率
+                     perfdog_pb2.CORE_FREQUENCY,         # Per-core frequency / コア別周波数
+                     perfdog_pb2.CPU_THROTTLING,         # Thermal throttling / サーマルスロットリング
+                     perfdog_pb2.THERMAL_STATUS,         # Device thermal state / 端末温度状態
+                     perfdog_pb2.MEMORY,                 # Memory (PSS etc.) / メモリ（PSS など）
+                     perfdog_pb2.ANDROID_MEMORY_DETAIL,  # Android memory detail / Android メモリ詳細
+                     perfdog_pb2.NETWORK_USAGE,          # Network bandwidth / ネットワーク帯域
+                     perfdog_pb2.SCREEN_BRIGHTNESS,      # Screen brightness / 画面輝度
+                 ],
                  dynamic_types=[
-                     (perfdog_pb2.GPU_COUNTER, 'GPU General'),
-                     (perfdog_pb2.GPU_COUNTER, 'GPU Stalls'),
+                     # Mali GPU dynamic counters (vendor-specific).
+                     # Mali GPU 動的カウンター（ベンダー依存）。
+                     (perfdog_pb2.GPU_COUNTER, 'Mali GPU Usage'),
+                     (perfdog_pb2.GPU_COUNTER, 'Mali GPU Utilization'),
+                     (perfdog_pb2.GPU_COUNTER, 'Mali Memory Bandwidth'),
+                     (perfdog_pb2.GPU_COUNTER, 'Mali Overdraw'),
                  ],
                  )
 
 
 def run_test_app(device, package_name, types=None, dynamic_types=None, enable_all_types=False):
-    # Create test object
-    # 创建测试对象
+    # Create the Test object that owns the lifecycle of one collection session.
+    # 1 回の計測セッションのライフサイクルを管理する Test オブジェクトを生成する。
     test = Test(device)
 
-    # Set the memory indicator sampling frequency in seconds, valid for Android devices
-    # Generally no setting is required, just use the default value
-    # 设置内存指标采样频率，单位秒，安卓设备有效
-    # 一般无需设置，使用缺省值即可
+    # Optional: override memory sampling frequency (seconds, Android only).
+    # オプション: メモリ指標のサンプリング周期を上書きする（秒、Android のみ）。
     # device.set_memory_sampling_frequency(4)
 
-    # Set up performance data callback
-    # 设置有性能数据回调
+    # An Event that is set on the first received perf data sample,
+    # used below to block until collection has actually started.
+    # 最初の性能データを受信した時にセットされる Event。
+    # 後段の wait() で計測の開始確定までブロックするために使う。
     evt = threading.Event()
     test.set_first_perf_data_callback(lambda: evt.set())
 
-    # Output performance data, it is recommended to enable it during debugging
-    # 输出性能数据，调试过程中建议开启
+    # Streamed per-second perf data callback. Useful while debugging.
+    # 1 秒ごとに流れる性能データのコールバック。デバッグ時に有用。
     test.set_perf_data_callback(lambda perf_data: logging.info(perf_data))
 
-    # Output the alarm and error information during the test. It is recommended to keep it. It is easy to check the log if there is a problem
-    # 输出测试过程中告警和错误信息，建议保留，出问题便于查日志
+    # Error / warning callbacks. Keep them on so problems are visible in logs.
+    # エラー / 警告コールバック。問題発生時にログから追えるよう常時有効化する。
     test.set_error_perf_data_callback(lambda perf_data: logging.info("PerfDog: %s", perf_data.errorData.msg))
     test.set_warning_perf_data_callback(lambda perf_data: logging.warning("PerfDog: %s", perf_data.warningData.msg))
 
-    # Automate general configuration to hide floating windows
-    # 自动化一般配置隐藏浮窗
+    # Hide the on-device floating window (Android automation friendly).
+    # 端末上のフローティングウィンドウを非表示にする（Android 自動化向け）。
     set_floating_window(device)
 
-    # Create the target App to be tested
-    # 创建要测试目标App
+    # Capture a device screenshot every 2 seconds.
+    # Screenshots are uploaded with the task and viewable on the PerfDog web console.
+    # 2 秒ごとに端末スクリーンショットを取得する。
+    # スクリーンショットはタスクと共にアップロードされ、PerfDog Web コンソールで閲覧できる。
+    device.set_screenshot_interval(2)
+
+    # Build and bind the test target (the app under test).
+    # 計測対象アプリを生成して Test に紐付ける。
     builder = test.create_test_target_builder(TestAppBuilder)
     builder.set_package_name(package_name)
     test.set_test_target(builder.build())
 
-    # Enable and disable related performance indicator types
-    # 启用和禁用相关性能指标类型
+    # If enable_all_types is True, query device-supported metrics and enable them all.
+    # Otherwise honor the explicit `types` / `dynamic_types` lists from the caller.
+    # enable_all_types が True の場合は対応指標をすべて有効化する。
+    # それ以外は呼び出し側から渡された types / dynamic_types のみを有効化する。
     if enable_all_types:
         types, dynamic_types = get_all_types(device)
 
@@ -107,47 +146,68 @@ def run_test_app(device, package_name, types=None, dynamic_types=None, enable_al
     if dynamic_types is not None:
         test.set_dynamic_types(*dynamic_types)
 
-    # If enable_all_types is set to true, the APP_STARTUP_TIME data item will be included
-    # If APP_STARTUP_TIME is enabled, the app will be restarted for each test
-    # If you need to measure this performance, remove this method
-    # enable_all_types设置为true情况下，会包含APP_STARTUP_TIME数据项
-    # 启用该数据项的话 ，每次测试会重启app
-    # 如果需要测量该数据项，去掉该方法
+    # APP_STARTUP_TIME forces the app to restart on every run -> disable by default.
+    # APP_STARTUP_TIME を有効にすると毎回アプリが再起動される -> 既定では無効化。
     test.disable_type(perfdog_pb2.APP_STARTUP_TIME)
 
-    # If enable_all_types is set to true, the APP_STARTUP_TIME data item will be included
-    # If SYSTEM_LOG is enabled, a large amount of system logs will be collected
-    # If you need to measure this performance, remove this method
-    # enable_all_types设置为true情况下，会包含SYSTEM_LOG数据项
-    # 启动该数据项的话，会收集大量系统日志
-    # 如果需要测量该数据项，去掉该方法
+    # SYSTEM_LOG produces a huge volume of system logs -> disable by default.
+    # SYSTEM_LOG は大量のシステムログを生成する -> 既定では無効化。
     test.disable_type(perfdog_pb2.SYSTEM_LOG)
 
     try:
-        # Start performance data collection
-        # 启动性能数据采集
+        # Begin performance data collection.
+        # 性能データの収集を開始する。
         test.start()
 
-        # Wait for performance data
-        # Need to use set_first_perf_data_callback to enable
-        # 等待有性能数据
-        # 需要使用set_first_perf_data_callback来启用
+        # Block until the first sample arrives -> guarantees collection is alive.
+        # 最初のサンプルが到着するまでブロックし、計測が確実に動いていることを保証する。
         evt.wait()
 
-        # TODO:
-        # It is recommended to add automated test processing logic here
-        # 建议在此处添加自动化测试处理逻辑
-        time.sleep(10)
-        test.set_label('label_x')
-        time.sleep(2)
-        test.add_note('n1', 12 * 1000)
-        time.sleep(2)
+        # ----- Automation timeline / 自動化シナリオのタイムライン -----
+        # The following segment is a placeholder. Replace with your real
+        # gameplay / UI automation steps (e.g. via uiautomator2, WDA, etc.).
+        # 以下はサンプル区間。実際の操作（uiautomator2、WDA など）に置き換える。
+
+        # Phase 0: warm-up, 30s
+        # フェーズ 0: ウォームアップ、30 秒
+        time.sleep(30)
+
+        # Mark phase 1 on the timeline.
+        # タイムラインにフェーズ 1 のラベルを付ける。
+        test.set_label('フェーズ1')
+
+        # Phase 1: 15s
+        # フェーズ 1: 15 秒
+        time.sleep(15)
+
+        # Attach a free-form note at the current timestamp (ms).
+        # 現在のタイムスタンプ（ミリ秒）に自由記述メモを添付する。
+        test.add_note('メモ1', int(time.time() * 1000))
+
+        # Phase 2: 15s
+        # フェーズ 2: 15 秒
+        time.sleep(15)
+
+        # Stop collection. Required before save_data().
+        # 計測を停止する。save_data() 呼び出し前に必須。
         test.stop()
-        test.save_data()
+
+        # Persist results: upload to PerfDog cloud + export Excel locally.
+        # 結果を保存する: PerfDog クラウドへアップロード + ローカル Excel 出力。
+        os.makedirs(REPORT_DIR, exist_ok=True)
+        case_name = 'nikke_{}'.format(time.strftime('%Y%m%d_%H%M%S'))
+        test.save_data(
+            case_name=case_name,
+            is_upload=True,                                  # upload to cloud / クラウド送信
+            is_export=True,                                  # also export locally / ローカル出力も行う
+            export_format=perfdog_pb2.EXPORT_TO_EXCEL,       # xlsx format / xlsx 形式
+            export_directory=REPORT_DIR,                     # output dir / 出力ディレクトリ
+        )
+        logging.info('Excel exported to: %s (case: %s)', REPORT_DIR, case_name)
 
     finally:
-        # Release necessary resources
-        # 必要的资源释放
+        # Safety net: ensure collection is stopped even if an exception was raised.
+        # 安全策: 例外発生時でも計測が停止されるようにする。
         if test.is_start():
             test.stop()
 
